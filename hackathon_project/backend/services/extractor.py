@@ -162,6 +162,42 @@ def deduplicate_items(items: List[str]) -> List[str]:
             unique_items.append(cleaned)
     return unique_items
 
+def extract_requirements_fallback(text: str) -> Dict[str, List[str]]:
+    """Fallback regex-based extraction for requirements when Ollama is unavailable."""
+    results = {
+        "requirements": [],
+        "deadlines": [],
+        "evaluation_criteria": [],
+        "mandatory_documents": [],
+        "budget_values": [],
+        "eligibility_criteria": [],
+        "qa_sections": []
+    }
+    
+    # Extract requirements with keywords
+    requirement_keywords = [
+        (r'(?:must|shall|required|mandatory|should)\s+(?:have|provide|include|support|ensure|implement|maintain)[^\n.]*(?:\.|$)', "requirements"),
+        (r'(?:certification|experience|years?)\s+(?:in|with|of)\s+[^\n.]*(?:\.|$)', "eligibility_criteria"),
+        (r'(?:budget|cost|price|funding|allocation)\s*(?:limit|maximum|not exceed|up to)[^\n.]*(?:\.|$)', "budget_values"),
+        (r'(?:deadline|due|submission|closing)\s+(?:date|time)[^\n.]*(?:\.|$)', "deadlines"),
+        (r'(?:evaluation|scoring|weight|percentage|criteria)[^\n.]*(?:\.|$)', "evaluation_criteria"),
+        (r'(?:document|attach|submit|provide)\s+(?:proof|evidence|certificate|copy)[^\n.]*(?:\.|$)', "mandatory_documents"),
+    ]
+    
+    for pattern, category in requirement_keywords:
+        matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
+        if matches:
+            for match in matches:
+                cleaned = match.strip()
+                if len(cleaned) > 10:  # Only include non-trivial matches
+                    results[category].append(cleaned)
+    
+    # Deduplicate all categories
+    for key in results:
+        results[key] = deduplicate_items(results[key])
+    
+    return results
+
 def extract_workspace_requirements(documents_text: List[str]) -> Dict[str, List[str]]:
     """Analyzes a list of document texts, chunks them, and returns consolidated requirements."""
     consolidated = {
@@ -184,6 +220,19 @@ def extract_workspace_requirements(documents_text: List[str]) -> Dict[str, List[
     # Deduplicate all keys
     for key in consolidated:
         consolidated[key] = deduplicate_items(consolidated[key])
+    
+    # If we got very few results, try fallback extraction
+    total_extracted = sum(len(v) for v in consolidated.values())
+    if total_extracted < 3:  # If we got less than 3 items total, use fallback
+        print(f"Ollama extraction returned only {total_extracted} items, using fallback regex extraction...")
+        for text in documents_text:
+            fallback_data = extract_requirements_fallback(text)
+            for key in consolidated:
+                consolidated[key].extend(fallback_data.get(key, []))
+        
+        # Deduplicate again after fallback
+        for key in consolidated:
+            consolidated[key] = deduplicate_items(consolidated[key])
 
     return consolidated
 
