@@ -1,6 +1,52 @@
+"""
+RFP Requirements and Entities Extraction Service
+
+This module provides comprehensive extraction of requirements and named entities from
+Request for Proposal (RFP) documents using a combination of:
+1. Local LLM (Ollama) for intelligent extraction with structured JSON responses
+2. Regex-based fallback extraction for robustness when LLM is unavailable
+3. Multi-level error handling and response parsing (direct JSON, markdown blocks, regex extraction)
+
+Extraction Categories:
+
+REQUIREMENTS:
+- requirements: Mandatory features and capabilities needed
+- deadlines: Submission and milestone dates/times
+- evaluation_criteria: Scoring weights and evaluation metrics
+- mandatory_documents: Required attachments and certifications
+- budget_values: Project costs and financial constraints
+- eligibility_criteria: Qualification requirements for participants
+- qa_sections: Questions, answers, and clarification procedures
+
+ENTITIES:
+- dates: Calendar dates mentioned in the document
+- deadlines: Explicit project or submission deadlines
+- money_budget: Monetary values and budget constraints
+- percentages: Percentage values and weights
+- organizations: Company or agency names
+- certifications: Industry certifications and standards
+- locations: Geographic locations and addresses
+
+Extraction Pipeline:
+1. Document text is split into overlapping chunks (15KB chunks with 500 char overlap)
+2. Each chunk is sent to Ollama for LLM-based extraction
+3. Responses are parsed with multiple fallback methods:
+   - Direct JSON parsing
+   - Markdown code block extraction
+   - Regex pattern matching
+4. Regex extraction provides additional entity detection
+5. If LLM extraction yields very few results, regex fallback is used for requirements
+6. All results are deduplicated based on lowercased values
+
+Configuration (from environment):
+- OLLAMA_BASE_URL: Local Ollama API endpoint (default: http://localhost:11434)
+- OLLAMA_MODEL: Model to use for extraction (default: llama3.2, recommended: gemma3:4b)
+"""
+
 import os
 import re
 import json
+import traceback
 import requests
 from typing import List, Dict, Any
 from dotenv import load_dotenv
@@ -9,6 +55,14 @@ load_dotenv()
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+
+# Minimum number of extracted items before falling back to regex extraction
+# If LLM extraction returns fewer items than this, regex patterns are used as fallback
+MIN_EXTRACTION_THRESHOLD = 3
+
+# Minimum length for regex match results to be considered valid
+# Matches shorter than this are filtered out to avoid spurious results
+MIN_MATCH_LENGTH = 10
 
 def chunk_text(text: str, chunk_size: int = 15000, overlap: int = 500) -> List[str]:
     """Splits a long text string into overlapping chunks."""
@@ -55,7 +109,7 @@ RFP Text Chunk:
 {text_chunk}
 \"\"\"
 
-Return a JSON object with this exact structure:
+Return ONLY a valid JSON object with this exact structure (no extra text before or after):
 {{
   "requirements": [],
   "deadlines": [],
@@ -70,6 +124,7 @@ Rules:
 - Do NOT hallucinate. Only extract items explicitly mentioned in the text.
 - If a category has no items in this chunk, return an empty array for it.
 - Keep the extracted items concise but include context (e.g., instead of just "ISO certification", write "Must possess ISO 9001 certification").
+- Return ONLY the JSON object, no other text.
 """
 
     url = f"{OLLAMA_BASE_URL}/api/generate"
@@ -87,8 +142,43 @@ Rules:
         response = requests.post(url, json=payload, timeout=60)
         if response.status_code == 200:
             result = response.json()
-            response_text = result.get("response", "{}")
-            data = json.loads(response_text)
+            response_text = result.get("response", "{}").strip()
+            
+            # Try to extract JSON from the response (in case there's extra text)
+            data = None
+            
+            # Try 1: Direct JSON parse
+            try:
+                data = json.loads(response_text)
+            except json.JSONDecodeError:
+                pass
+            
+            # Try 2: Find JSON in markdown code blocks
+            if not data:
+                markdown_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
+                if markdown_match:
+                    try:
+                        data = json.loads(markdown_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+            
+            # Try 3: Find JSON with regex
+            # Note: This regex pattern handles up to ~2 levels of nesting, which is sufficient for our
+            # flat array JSON responses from Ollama. For deeply nested JSON structures (3+ levels),
+            # a proper JSON parser would be needed. Since Ollama responses contain only arrays of
+            # strings, this approach is adequate.
+            if not data:
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        data = json.loads(json_match.group(0))
+                    except json.JSONDecodeError:
+                        pass
+            
+            if not data:
+                print(f"Failed to parse Ollama response as JSON")
+                print(f"Response text: {response_text[:300]}")
+                data = {}
             
             # Standardize and defensively extract strings
             return {
@@ -108,6 +198,7 @@ Rules:
             }
     except Exception as e:
         print(f"Error calling Ollama API: {e}")
+        traceback.print_exc()
         return {
             "requirements": [], "deadlines": [], "evaluation_criteria": [], "mandatory_documents": [],
             "budget_values": [], "eligibility_criteria": [], "qa_sections": []
@@ -127,6 +218,42 @@ def deduplicate_items(items: List[str]) -> List[str]:
             seen.add(lower_item)
             unique_items.append(cleaned)
     return unique_items
+
+def extract_requirements_fallback(text: str) -> Dict[str, List[str]]:
+    """Fallback regex-based extraction for requirements when Ollama is unavailable."""
+    results = {
+        "requirements": [],
+        "deadlines": [],
+        "evaluation_criteria": [],
+        "mandatory_documents": [],
+        "budget_values": [],
+        "eligibility_criteria": [],
+        "qa_sections": []
+    }
+    
+    # Extract requirements with keywords
+    requirement_keywords = [
+        (r'(?:must|shall|required|mandatory|should)\s+(?:have|provide|include|support|ensure|implement|maintain)[^\n.]*(?:\.|$)', "requirements"),
+        (r'(?:certification|experience|years?)\s+(?:in|with|of)\s+[^\n.]*(?:\.|$)', "eligibility_criteria"),
+        (r'(?:budget|cost|price|funding|allocation)\s*(?:limit|maximum|not exceed|up to)[^\n.]*(?:\.|$)', "budget_values"),
+        (r'(?:deadline|due|submission|closing)\s+(?:date|time)[^\n.]*(?:\.|$)', "deadlines"),
+        (r'(?:evaluation|scoring|weight|percentage|criteria)[^\n.]*(?:\.|$)', "evaluation_criteria"),
+        (r'(?:document|attach|submit|provide)\s+(?:proof|evidence|certificate|copy)[^\n.]*(?:\.|$)', "mandatory_documents"),
+    ]
+    
+    for pattern, category in requirement_keywords:
+        matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
+        if matches:
+            for match in matches:
+                cleaned = match.strip()
+                if len(cleaned) > MIN_MATCH_LENGTH:  # Only include non-trivial matches
+                    results[category].append(cleaned)
+    
+    # Deduplicate all categories
+    for key in results:
+        results[key] = deduplicate_items(results[key])
+    
+    return results
 
 def extract_workspace_requirements(documents_text: List[str]) -> Dict[str, List[str]]:
     """Analyzes a list of document texts, chunks them, and returns consolidated requirements."""
@@ -150,6 +277,19 @@ def extract_workspace_requirements(documents_text: List[str]) -> Dict[str, List[
     # Deduplicate all keys
     for key in consolidated:
         consolidated[key] = deduplicate_items(consolidated[key])
+    
+    # If we got very few results, try fallback extraction
+    total_extracted = sum(len(v) for v in consolidated.values())
+    if total_extracted < MIN_EXTRACTION_THRESHOLD:
+        print(f"Ollama extraction returned only {total_extracted} items, using fallback regex extraction...")
+        for text in documents_text:
+            fallback_data = extract_requirements_fallback(text)
+            for key in consolidated:
+                consolidated[key].extend(fallback_data.get(key, []))
+        
+        # Deduplicate again after fallback
+        for key in consolidated:
+            consolidated[key] = deduplicate_items(consolidated[key])
 
     return consolidated
 
@@ -200,7 +340,7 @@ RFP Text Chunk:
 {text_chunk}
 \"\"\"
 
-Return a JSON object with this exact structure:
+Return ONLY a valid JSON object with this exact structure (no extra text before or after):
 {{
   "dates": [],
   "deadlines": [],
@@ -215,6 +355,7 @@ Rules:
 - Do NOT hallucinate. Only extract items explicitly mentioned in the text.
 - If a category has no items in this chunk, return an empty array for it.
 - Keep the extracted values concise and precise.
+- Return ONLY the JSON object, no other text.
 """
 
     url = f"{OLLAMA_BASE_URL}/api/generate"
@@ -232,8 +373,39 @@ Rules:
         response = requests.post(url, json=payload, timeout=60)
         if response.status_code == 200:
             result = response.json()
-            response_text = result.get("response", "{}")
-            data = json.loads(response_text)
+            response_text = result.get("response", "{}").strip()
+            
+            # Try to extract JSON from the response (in case there's extra text)
+            data = None
+            
+            # Try 1: Direct JSON parse
+            try:
+                data = json.loads(response_text)
+            except json.JSONDecodeError:
+                pass
+            
+            # Try 2: Find JSON in markdown code blocks
+            if not data:
+                markdown_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
+                if markdown_match:
+                    try:
+                        data = json.loads(markdown_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+            
+            # Try 3: Find JSON with regex
+            if not data:
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        data = json.loads(json_match.group(0))
+                    except json.JSONDecodeError:
+                        pass
+            
+            if not data:
+                print(f"Failed to parse Ollama entity response as JSON")
+                print(f"Response text: {response_text[:300]}")
+                data = {}
             
             return {
                 "dates": [extract_string_from_item(x) for x in data.get("dates", [])],
@@ -252,6 +424,7 @@ Rules:
             }
     except Exception as e:
         print(f"Error calling Ollama API for entities: {e}")
+        traceback.print_exc()
         return {
             "dates": [], "deadlines": [], "money_budget": [], "percentages": [],
             "organizations": [], "certifications": [], "locations": []
