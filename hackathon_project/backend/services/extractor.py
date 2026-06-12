@@ -95,7 +95,6 @@ Rules:
                 data = json.loads(response_text)
             except json.JSONDecodeError:
                 # Try to find JSON object in the response
-                import re
                 json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                 if json_match:
                     try:
@@ -260,7 +259,6 @@ Rules:
                 data = json.loads(response_text)
             except json.JSONDecodeError:
                 # Try to find JSON object in the response
-                import re
                 json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                 if json_match:
                     try:
