@@ -60,6 +60,10 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 # If LLM extraction returns fewer items than this, regex patterns are used as fallback
 MIN_EXTRACTION_THRESHOLD = 3
 
+# Minimum length for regex match results to be considered valid
+# Matches shorter than this are filtered out to avoid spurious results
+MIN_MATCH_LENGTH = 10
+
 def chunk_text(text: str, chunk_size: int = 15000, overlap: int = 500) -> List[str]:
     """Splits a long text string into overlapping chunks."""
     if not text:
@@ -242,7 +246,7 @@ def extract_requirements_fallback(text: str) -> Dict[str, List[str]]:
         if matches:
             for match in matches:
                 cleaned = match.strip()
-                if len(cleaned) > 10:  # Only include non-trivial matches
+                if len(cleaned) > MIN_MATCH_LENGTH:  # Only include non-trivial matches
                     results[category].append(cleaned)
     
     # Deduplicate all categories
