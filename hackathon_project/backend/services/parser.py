@@ -1,8 +1,8 @@
 import os
 import io
+import tempfile
 import fitz  # PyMuPDF
 import docx
-import tempfile
 import pythoncom
 import win32com.client
 
@@ -45,24 +45,21 @@ def parse_docx(file_bytes: bytes) -> str:
 def parse_doc_with_word(file_bytes: bytes) -> str:
     """Uses MS Word COM Automation to parse binary .doc files by converting them to text."""
     pythoncom.CoInitialize()
-    
-    # Use D:\temp since C: drive has extremely limited space
-    temp_dir = "D:\\temp"
-    os.makedirs(temp_dir, exist_ok=True)
-    
+
+    temp_dir = tempfile.gettempdir()
     fd, temp_path = tempfile.mkstemp(suffix=".doc", dir=temp_dir)
+    word = None
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(file_bytes)
-            
+
         word = win32com.client.Dispatch("Word.Application")
         word.Visible = False
-        
+
         doc = word.Documents.Open(temp_path)
         text = doc.Content.Text
         doc.Close(False)
-        word.Quit()
-        
+
         if text:
             # Normalize Word carriage returns
             text = text.replace('\r', '\n')
@@ -70,6 +67,12 @@ def parse_doc_with_word(file_bytes: bytes) -> str:
     except Exception as e:
         raise ValueError(f"Error parsing .doc document via MS Word: {str(e)}")
     finally:
+        # Always close Word to prevent orphan processes
+        if word is not None:
+            try:
+                word.Quit()
+            except Exception:
+                pass
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)

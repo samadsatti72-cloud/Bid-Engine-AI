@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
@@ -8,6 +9,19 @@ from database import get_db
 import models
 import schemas
 from services.parser import parse_document
+
+# ── Security constants ────────────────────────────────────────────────────────
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt"}
+MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _safe_filename(name: str) -> str:
+    """Strip directory traversal characters and keep only safe characters."""
+    # Take only the basename (no slashes)
+    name = os.path.basename(name)
+    # Replace any character that isn't alphanumeric, dash, underscore, or dot
+    name = re.sub(r"[^\w.\-]", "_", name)
+    return name or "upload"
 
 router = APIRouter(prefix="/api/workspaces", tags=["Upload"])
 
@@ -37,7 +51,22 @@ async def upload_document(
         )
         
     file_size = len(contents)
-    filename = file.filename
+    filename = _safe_filename(file.filename or "upload")
+
+    # Validate extension against whitelist
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"File type '{ext}' is not supported. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+
+    # Enforce per-file size limit
+    if file_size > MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size {file_size // 1024} KB exceeds the {MAX_FILE_BYTES // (1024*1024)} MB limit."
+        )
     
     # 3. Parse raw text
     try:

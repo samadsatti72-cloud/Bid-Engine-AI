@@ -2,6 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List
+import secrets
+
+try:
+    from passlib.context import CryptContext
+    _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    def _hash_password(plain: str) -> str:
+        return _pwd_context.hash(plain)
+except ImportError:
+    import hashlib
+    def _hash_password(plain: str) -> str:  # type: ignore[misc]
+        return hashlib.sha256(plain.encode()).hexdigest()
 
 from database import get_db
 import models
@@ -14,11 +25,12 @@ def create_workspace(workspace: schemas.WorkspaceCreate, db: Session = Depends(g
     # Retrieve a default user to set as creator for referential integrity
     default_user = db.query(models.User).first()
     if not default_user:
-        # Create a default user on the fly if none exists
+        # Create a default system user on first run with a random strong password
+        _initial_password = secrets.token_urlsafe(32)  # random, not reused
         default_user = models.User(
-            email="admin@example.com",
-            password_hash="pbkdf2_sha256_dummy_hash",
-            full_name="Default Bid Manager"
+            email="system@bid-engine.internal",
+            password_hash=_hash_password(_initial_password),
+            full_name="System User"
         )
         db.add(default_user)
         db.commit()

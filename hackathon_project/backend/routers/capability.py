@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, cast, String
 from uuid import UUID
 from typing import List, Optional
 import os
+import re
 import uuid
 
 from database import get_db
@@ -11,6 +12,10 @@ import models
 import schemas
 from services.capability_service import chunk_text, extract_metadata_from_chunk
 from services.parser import parse_document
+
+# ── Security constants ────────────────────────────────────────────────────────
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt"}
+MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 router = APIRouter(prefix="/api/capabilities", tags=["Capability Library"])
 
@@ -67,8 +72,16 @@ CAP-049	Cybersecurity	Project 49: Cybersecurity deployment for client	CE Mark	20
 CAP-050	ERP Implementation	Project 50: ERP Implementation deployment for client	ISO 27001	2022	PKR 93M	24	Private Sector"""
 
 @router.post("/seed", status_code=status.HTTP_201_CREATED)
-def seed_capability_library(db: Session = Depends(get_db)):
+def seed_capability_library(
+    confirm: bool = Query(False, description="Must be true to execute this destructive operation."),
+    db: Session = Depends(get_db)
+):
     """Wipes active library items and seeds the 50 past projects & certifications."""
+    if not confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This operation will wipe all existing capability records. Pass ?confirm=true to proceed."
+        )
     try:
         # 1. Clear previous records
         db.query(models.CapabilityLibrary).delete()
@@ -152,7 +165,7 @@ def seed_capability_library(db: Session = Depends(get_db)):
 
 @router.post("/ingest", response_model=List[schemas.CapabilityResponse], status_code=status.HTTP_201_CREATED)
 async def ingest_capability_document(
-    category: str, # "Case Study", "Certification", "CV", "Company Profile", etc.
+    category: str,  # "Case Study", "Certification", "CV", "Company Profile", etc.
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
@@ -166,7 +179,23 @@ async def ingest_capability_document(
             detail=f"Could not read uploaded file: {str(e)}"
         )
 
-    filename = file.filename
+    filename = os.path.basename(file.filename or "upload")
+    filename = re.sub(r"[^\w.\-]", "_", filename) or "upload"
+
+    # Validate extension
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"File type '{ext}' is not supported. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+
+    # Enforce file size limit
+    if len(contents) > MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds the {MAX_FILE_BYTES // (1024*1024)} MB limit."
+        )
     
     # 2. Parse raw text
     try:
@@ -253,8 +282,16 @@ def get_capabilities(
     return query.order_by(models.CapabilityLibrary.created_at.desc()).all()
 
 @router.delete("/reset")
-def clear_capability_library(db: Session = Depends(get_db)):
+def clear_capability_library(
+    confirm: bool = Query(False, description="Must be true to execute this destructive operation."),
+    db: Session = Depends(get_db)
+):
     """Clears all records in the capability library."""
+    if not confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This operation will permanently delete all capability records. Pass ?confirm=true to proceed."
+        )
     try:
         num_deleted = db.query(models.CapabilityLibrary).delete()
         db.commit()

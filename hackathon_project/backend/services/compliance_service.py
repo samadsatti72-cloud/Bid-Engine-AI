@@ -137,7 +137,7 @@ JSON:""",
         }
         
         url = f"{OLLAMA_BASE_URL}/api/generate"
-        response = requests.post(url, json=payload, timeout=20)
+        response = requests.post(url, json=payload, timeout=90)  # increased: LLM reasoning takes time
         if response.status_code == 200:
             res_json = response.json()
             output_text = res_json.get("response", "").strip()

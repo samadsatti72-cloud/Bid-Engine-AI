@@ -1,7 +1,8 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator, Field
 from uuid import UUID
 from datetime import datetime
 from typing import Optional, List, Any
+import re
 
 # Base Schema Config
 class BaseSchema(BaseModel):
@@ -9,11 +10,19 @@ class BaseSchema(BaseModel):
 
 # User Schemas
 class UserBase(BaseSchema):
-    email: str
-    full_name: str
+    email: str = Field(..., max_length=255)
+    full_name: str = Field(..., max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        pattern = r'^[\w.+\-]+@[\w\-]+\.[a-z]{2,}$'
+        if not re.match(pattern, v, re.IGNORECASE):
+            raise ValueError("Invalid email address format.")
+        return v.lower().strip()
 
 class UserCreate(UserBase):
-    password: str
+    password: str = Field(..., min_length=8, max_length=128)
 
 class UserResponse(UserBase):
     id: UUID
@@ -21,8 +30,8 @@ class UserResponse(UserBase):
 
 # Workspace Schemas
 class WorkspaceBase(BaseSchema):
-    name: str
-    description: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=2000)
 
 class WorkspaceCreate(WorkspaceBase):
     pass
@@ -106,19 +115,19 @@ class ComplianceResultResponse(BaseSchema):
 
 # Proposal Section Schemas
 class ProposalSectionBase(BaseSchema):
-    section_title: str
-    section_code: Optional[str] = None
-    prompt_instruction: Optional[str] = None
+    section_title: str = Field(..., min_length=1, max_length=255)
+    section_code: Optional[str] = Field(None, max_length=50)
+    prompt_instruction: Optional[str] = Field(None, max_length=5000)
 
 class ProposalSectionCreate(ProposalSectionBase):
     pass
 
 class ProposalSectionUpdate(BaseSchema):
-    section_title: Optional[str] = None
-    section_code: Optional[str] = None
-    prompt_instruction: Optional[str] = None
-    draft_content: Optional[str] = None
-    status: Optional[str] = None
+    section_title: Optional[str] = Field(None, min_length=1, max_length=255)
+    section_code: Optional[str] = Field(None, max_length=50)
+    prompt_instruction: Optional[str] = Field(None, max_length=5000)
+    draft_content: Optional[str] = Field(None, max_length=50000)
+    status: Optional[str] = Field(None, max_length=50)
 
 class ProposalSectionResponse(ProposalSectionBase):
     id: UUID

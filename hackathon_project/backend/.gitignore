@@ -1,0 +1,29 @@
+# Environment variables (contains DB credentials - NEVER commit this)
+.env
+.env.*
+!.env.example
+
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Uploaded documents (user data - should not be in version control)
+uploads/
+
+# Chroma vector store (local DB)
+chroma_store/
+
+# IDE / OS
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Logs
+*.log
