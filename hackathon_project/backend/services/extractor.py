@@ -55,7 +55,7 @@ RFP Text Chunk:
 {text_chunk}
 \"\"\"
 
-Return a JSON object with this exact structure:
+Return ONLY a valid JSON object with this exact structure (no extra text before or after):
 {{
   "requirements": [],
   "deadlines": [],
@@ -70,6 +70,7 @@ Rules:
 - Do NOT hallucinate. Only extract items explicitly mentioned in the text.
 - If a category has no items in this chunk, return an empty array for it.
 - Keep the extracted items concise but include context (e.g., instead of just "ISO certification", write "Must possess ISO 9001 certification").
+- Return ONLY the JSON object, no other text.
 """
 
     url = f"{OLLAMA_BASE_URL}/api/generate"
@@ -87,8 +88,25 @@ Rules:
         response = requests.post(url, json=payload, timeout=60)
         if response.status_code == 200:
             result = response.json()
-            response_text = result.get("response", "{}")
-            data = json.loads(response_text)
+            response_text = result.get("response", "{}").strip()
+            
+            # Try to extract JSON from the response (in case there's extra text)
+            try:
+                data = json.loads(response_text)
+            except json.JSONDecodeError:
+                # Try to find JSON object in the response
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        data = json.loads(json_match.group(0))
+                    except json.JSONDecodeError as je:
+                        print(f"Failed to parse extracted JSON: {je}")
+                        print(f"Response text: {response_text[:500]}")
+                        data = {}
+                else:
+                    print(f"No JSON found in Ollama response: {response_text[:500]}")
+                    data = {}
             
             # Standardize and defensively extract strings
             return {
@@ -108,6 +126,8 @@ Rules:
             }
     except Exception as e:
         print(f"Error calling Ollama API: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             "requirements": [], "deadlines": [], "evaluation_criteria": [], "mandatory_documents": [],
             "budget_values": [], "eligibility_criteria": [], "qa_sections": []
@@ -200,7 +220,7 @@ RFP Text Chunk:
 {text_chunk}
 \"\"\"
 
-Return a JSON object with this exact structure:
+Return ONLY a valid JSON object with this exact structure (no extra text before or after):
 {{
   "dates": [],
   "deadlines": [],
@@ -215,6 +235,7 @@ Rules:
 - Do NOT hallucinate. Only extract items explicitly mentioned in the text.
 - If a category has no items in this chunk, return an empty array for it.
 - Keep the extracted values concise and precise.
+- Return ONLY the JSON object, no other text.
 """
 
     url = f"{OLLAMA_BASE_URL}/api/generate"
@@ -232,8 +253,25 @@ Rules:
         response = requests.post(url, json=payload, timeout=60)
         if response.status_code == 200:
             result = response.json()
-            response_text = result.get("response", "{}")
-            data = json.loads(response_text)
+            response_text = result.get("response", "{}").strip()
+            
+            # Try to extract JSON from the response (in case there's extra text)
+            try:
+                data = json.loads(response_text)
+            except json.JSONDecodeError:
+                # Try to find JSON object in the response
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        data = json.loads(json_match.group(0))
+                    except json.JSONDecodeError as je:
+                        print(f"Failed to parse extracted JSON for entities: {je}")
+                        print(f"Response text: {response_text[:500]}")
+                        data = {}
+                else:
+                    print(f"No JSON found in Ollama entity response: {response_text[:500]}")
+                    data = {}
             
             return {
                 "dates": [extract_string_from_item(x) for x in data.get("dates", [])],
@@ -252,6 +290,8 @@ Rules:
             }
     except Exception as e:
         print(f"Error calling Ollama API for entities: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             "dates": [], "deadlines": [], "money_budget": [], "percentages": [],
             "organizations": [], "certifications": [], "locations": []
