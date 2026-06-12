@@ -1,3 +1,48 @@
+"""
+RFP Requirements and Entities Extraction Service
+
+This module provides comprehensive extraction of requirements and named entities from
+Request for Proposal (RFP) documents using a combination of:
+1. Local LLM (Ollama) for intelligent extraction with structured JSON responses
+2. Regex-based fallback extraction for robustness when LLM is unavailable
+3. Multi-level error handling and response parsing (direct JSON, markdown blocks, regex extraction)
+
+Extraction Categories:
+
+REQUIREMENTS:
+- requirements: Mandatory features and capabilities needed
+- deadlines: Submission and milestone dates/times
+- evaluation_criteria: Scoring weights and evaluation metrics
+- mandatory_documents: Required attachments and certifications
+- budget_values: Project costs and financial constraints
+- eligibility_criteria: Qualification requirements for participants
+- qa_sections: Questions, answers, and clarification procedures
+
+ENTITIES:
+- dates: Calendar dates mentioned in the document
+- deadlines: Explicit project or submission deadlines
+- money_budget: Monetary values and budget constraints
+- percentages: Percentage values and weights
+- organizations: Company or agency names
+- certifications: Industry certifications and standards
+- locations: Geographic locations and addresses
+
+Extraction Pipeline:
+1. Document text is split into overlapping chunks (15KB chunks with 500 char overlap)
+2. Each chunk is sent to Ollama for LLM-based extraction
+3. Responses are parsed with multiple fallback methods:
+   - Direct JSON parsing
+   - Markdown code block extraction
+   - Regex pattern matching
+4. Regex extraction provides additional entity detection
+5. If LLM extraction yields very few results, regex fallback is used for requirements
+6. All results are deduplicated based on lowercased values
+
+Configuration (from environment):
+- OLLAMA_BASE_URL: Local Ollama API endpoint (default: http://localhost:11434)
+- OLLAMA_MODEL: Model to use for extraction (default: llama3.2, recommended: gemma3:4b)
+"""
+
 import os
 import re
 import json
