@@ -46,6 +46,7 @@ Configuration (from environment):
 import os
 import re
 import json
+import traceback
 import requests
 from typing import List, Dict, Any
 from dotenv import load_dotenv
@@ -54,6 +55,10 @@ load_dotenv()
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+
+# Minimum number of extracted items before falling back to regex extraction
+# If LLM extraction returns fewer items than this, regex patterns are used as fallback
+MIN_EXTRACTION_THRESHOLD = 3
 
 def chunk_text(text: str, chunk_size: int = 15000, overlap: int = 500) -> List[str]:
     """Splits a long text string into overlapping chunks."""
@@ -154,6 +159,10 @@ Rules:
                         pass
             
             # Try 3: Find JSON with regex
+            # Note: This regex pattern handles up to ~2 levels of nesting, which is sufficient for our
+            # flat array JSON responses from Ollama. For deeply nested JSON structures (3+ levels),
+            # a proper JSON parser would be needed. Since Ollama responses contain only arrays of
+            # strings, this approach is adequate.
             if not data:
                 json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
                 if json_match:
@@ -185,7 +194,6 @@ Rules:
             }
     except Exception as e:
         print(f"Error calling Ollama API: {e}")
-        import traceback
         traceback.print_exc()
         return {
             "requirements": [], "deadlines": [], "evaluation_criteria": [], "mandatory_documents": [],
@@ -268,7 +276,7 @@ def extract_workspace_requirements(documents_text: List[str]) -> Dict[str, List[
     
     # If we got very few results, try fallback extraction
     total_extracted = sum(len(v) for v in consolidated.values())
-    if total_extracted < 3:  # If we got less than 3 items total, use fallback
+    if total_extracted < MIN_EXTRACTION_THRESHOLD:
         print(f"Ollama extraction returned only {total_extracted} items, using fallback regex extraction...")
         for text in documents_text:
             fallback_data = extract_requirements_fallback(text)
@@ -412,7 +420,6 @@ Rules:
             }
     except Exception as e:
         print(f"Error calling Ollama API for entities: {e}")
-        import traceback
         traceback.print_exc()
         return {
             "dates": [], "deadlines": [], "money_budget": [], "percentages": [],
