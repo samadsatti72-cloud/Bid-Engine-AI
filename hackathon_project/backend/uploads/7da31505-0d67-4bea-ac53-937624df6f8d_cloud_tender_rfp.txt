@@ -1,0 +1,23 @@
+# RFP-2026-CLOUD: Cloud migration services
+Acme Corporation is requesting proposals for Cloud Migration Services.
+
+## 1. Eligibility & Mandatory Requirements
+The contractor MUST possess ISO 27001 Information Security Management certification.
+The contractor must have a minimum of 5 years of experience in enterprise Kubernetes deployments.
+All proposed engineers must hold active AWS Solution Architect Professional certificates.
+
+## 2. Evaluation Criteria
+Proposal suitability will be evaluated as follows:
+- Technical Approach and Experience: 40% of the total score.
+- Pricing structure and rates: 30% of the total score.
+- Case studies and references: 30% of the total score.
+
+## 3. Mandatory Documents for Submission
+Bidders must submit:
+- Copy of ISO 27001 Certificate
+- Resumes of proposed Key Personnel
+- Case studies of 3 similar projects completed in the past 3 years
+
+## 4. Key Deadlines
+- Proposal Submission Deadline: July 15, 2026, at 5:00 PM EST.
+- Q&A Submission Deadline: June 30, 2026.

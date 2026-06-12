@@ -1,0 +1,8 @@
+# Section 1.0 Project Scope
+The contractor shall design, implement, and maintain a robust container orchestration platform using Kubernetes.
+The contractor MUST support automatic horizontal scaling based on CPU metrics.
+All data MUST be encrypted in transit using TLS 1.3.
+
+# Section 2.0 Compliance Requirements
+REQ-01: Systems must maintain 99.99% availability.
+REQ-02: Support team must respond to Critical issues within 15 minutes.
