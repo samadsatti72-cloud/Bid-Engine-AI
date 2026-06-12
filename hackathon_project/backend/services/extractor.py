@@ -91,21 +91,36 @@ Rules:
             response_text = result.get("response", "{}").strip()
             
             # Try to extract JSON from the response (in case there's extra text)
+            data = None
+            
+            # Try 1: Direct JSON parse
             try:
                 data = json.loads(response_text)
             except json.JSONDecodeError:
-                # Try to find JSON object in the response
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                pass
+            
+            # Try 2: Find JSON in markdown code blocks
+            if not data:
+                markdown_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
+                if markdown_match:
+                    try:
+                        data = json.loads(markdown_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+            
+            # Try 3: Find JSON with regex
+            if not data:
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
                 if json_match:
                     try:
                         data = json.loads(json_match.group(0))
-                    except json.JSONDecodeError as je:
-                        print(f"Failed to parse extracted JSON: {je}")
-                        print(f"Response text: {response_text[:500]}")
-                        data = {}
-                else:
-                    print(f"No JSON found in Ollama response: {response_text[:500]}")
-                    data = {}
+                    except json.JSONDecodeError:
+                        pass
+            
+            if not data:
+                print(f"Failed to parse Ollama response as JSON")
+                print(f"Response text: {response_text[:300]}")
+                data = {}
             
             # Standardize and defensively extract strings
             return {
@@ -255,21 +270,36 @@ Rules:
             response_text = result.get("response", "{}").strip()
             
             # Try to extract JSON from the response (in case there's extra text)
+            data = None
+            
+            # Try 1: Direct JSON parse
             try:
                 data = json.loads(response_text)
             except json.JSONDecodeError:
-                # Try to find JSON object in the response
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                pass
+            
+            # Try 2: Find JSON in markdown code blocks
+            if not data:
+                markdown_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', response_text, re.DOTALL)
+                if markdown_match:
+                    try:
+                        data = json.loads(markdown_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+            
+            # Try 3: Find JSON with regex
+            if not data:
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
                 if json_match:
                     try:
                         data = json.loads(json_match.group(0))
-                    except json.JSONDecodeError as je:
-                        print(f"Failed to parse extracted JSON for entities: {je}")
-                        print(f"Response text: {response_text[:500]}")
-                        data = {}
-                else:
-                    print(f"No JSON found in Ollama entity response: {response_text[:500]}")
-                    data = {}
+                    except json.JSONDecodeError:
+                        pass
+            
+            if not data:
+                print(f"Failed to parse Ollama entity response as JSON")
+                print(f"Response text: {response_text[:300]}")
+                data = {}
             
             return {
                 "dates": [extract_string_from_item(x) for x in data.get("dates", [])],
